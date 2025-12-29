@@ -22,3 +22,8 @@ MobileVLCKit/ImportedSources
 Tests/Assets
 Headers/Internal/vlc-plugins-*
 VLCKit-*
+
+# Swift Package Manager
+.build
+.swiftpm
+.spm-build
