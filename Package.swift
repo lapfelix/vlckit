@@ -21,8 +21,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "VLCKit",
-            url: "https://github.com/lapfelix/vlckit/releases/download/4.0.0a21/VLCKit.xcframework.zip",
-            checksum: "fcbdc18727b9e698338bc917f8483bc68da85554af5f5eed25caac2ce60d94d8"
+            url: "https://github.com/lapfelix/vlckit/releases/download/4.0.0a22/VLCKit.xcframework.zip",
+            checksum: "0f21ff53dde45eadee37d3e388db7abe1ec91d7eef1f4c3a88554bfca1a87e59"
         )
     ]
 )
