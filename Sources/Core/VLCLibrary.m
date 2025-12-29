@@ -45,7 +45,14 @@
 #endif
 #endif
 
-#if TARGET_OS_IOS
+/* Mac Catalyst must be checked before TARGET_OS_IOS since it sets both */
+#if TARGET_OS_MACCATALYST
+#if __aarch64__
+# include "vlc-plugins-maccatalyst-device-arm64.h"
+#else
+# include "vlc-plugins-maccatalyst-device-x86_64.h"
+#endif
+#elif TARGET_OS_IOS
 #if TARGET_OS_SIMULATOR
 #if __x86_64__
 # include "vlc-plugins-iphone-simulator-x86_64.h"

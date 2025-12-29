@@ -19,6 +19,7 @@ MACOS=no
 IOS=yes
 XROS=no
 WATCHOS=no
+CATALYST=no
 BITCODE=no
 INCLUDE_ARMV7=no
 OSVERSIONMINCFLAG=iphoneos
@@ -49,6 +50,7 @@ OPTIONS
    -x       Build for macOS / Mac OS X
    -i       Build for xrOS / visionOS
    -w       Build for watchOS
+   -c       Build for Mac Catalyst
    -b       Enable bitcode
    -a       Build framework for specific arch (all|x86_64|armv7|aarch64)
    -e       External VLC source path
@@ -137,6 +139,9 @@ buildxcodeproj()
                 architectures="arm64_32 arm64"
             fi
         fi
+        if [ "$CATALYST" = "yes" ]; then
+            architectures="arm64 x86_64"
+        fi
     else
         architectures=`get_actual_arch $FARCH`
     fi
@@ -169,12 +174,20 @@ buildxcodeproj()
 
     local defs="$GCC_PREPROCESSOR_DEFINITIONS"
 
+    # Mac Catalyst requires special destination format
+    local destinationArg=""
+    if [ "$PLATFORMNAME" = "Mac Catalyst" ]; then
+        destinationArg="generic/platform=macOS,variant=Mac Catalyst"
+    else
+        destinationArg="generic/platform=${PLATFORMNAME}"
+    fi
+
     xcodebuild archive \
                -project "$1.xcodeproj" \
                -sdk $PLATFORM$SDK \
                -configuration ${CONFIGURATION} \
                -scheme "VLCKit" \
-               -destination "generic/platform=${PLATFORMNAME}" \
+               -destination "${destinationArg}" \
                -archivePath build/VLCKit-$PLATFORM$SDK.xcarchive \
                ARCHS="${architectures}" \
                ${deploymentTargetFlag} \
@@ -239,6 +252,10 @@ buildMobileKit() {
             if [ "$MACOS" = "yes" ]; then
                 buildLibVLC "aarch64" "macosx"
                 buildLibVLC "x86_64" "macosx"
+            fi
+            if [ "$CATALYST" = "yes" ]; then
+                buildLibVLC "aarch64" "maccatalyst"
+                buildLibVLC "x86_64" "maccatalyst"
             fi
             if [ "$XROS" = "yes" ]; then
                 info "building for xrOS"
@@ -383,14 +400,17 @@ build_device_static_lib() {
     VLCSTATICMODULELIST=""
 
     # brute-force test the available architectures we could lipo
-    check_lipo "${OSSTYLE}os" arm64
-    if [ "$IOS" = "yes" ]; then
-        check_lipo "${OSSTYLE}os" armv7
+    # Note: maccatalyst, macosx and XR are not -os or -simulator suffixed
+    if [ "$OSSTYLE" != "maccatalyst" ] && [ "$OSSTYLE" != "macosx" ] && [ "$OSSTYLE" != "xros" ]; then
+        check_lipo "${OSSTYLE}os" arm64
+        if [ "$IOS" = "yes" ]; then
+            check_lipo "${OSSTYLE}os" armv7
+        fi
     fi
     if [ "$WATCHOS" = "yes" ]; then
         check_lipo "${OSSTYLE}" arm64_32
     fi
-    # macosx and XR are not -os or -simulator suffixed in the script unfortunately.
+    # macosx, maccatalyst and XR are not -os or -simulator suffixed in the script unfortunately.
     check_lipo "${OSSTYLE}" x86_64
     check_lipo "${OSSTYLE}" arm64
 
@@ -401,7 +421,7 @@ build_device_static_lib() {
     fi
 }
 
-while getopts "hvsfbrxiwntl7k:a:e:" OPTION
+while getopts "hvsfbrxiwcntl7k:a:e:" OPTION
 do
      case $OPTION in
          h)
@@ -483,6 +503,17 @@ do
              BUILD_DEVICE=yes
              BUILD_FRAMEWORK=yes
              ;;
+         c)
+             CATALYST=yes
+             IOS=no
+             BITCODE=no
+             SDK_VERSION=`xcrun --sdk macosx --show-sdk-version`
+             SDK_MIN=13.1
+             OSVERSIONMINCFLAG=maccatalyst
+             OSVERSIONMINLDFLAG=maccatalyst
+             BUILD_DEVICE=yes
+             BUILD_FRAMEWORK=yes
+             ;;
          e)
              VLCROOT=$OPTARG
              ;;
@@ -545,6 +576,27 @@ if [ "$VLCROOT" = "" ]; then
     spopd
 fi
 
+# Apply Mac Catalyst patches to VLC build system
+# Note: Patches should already be applied manually to libvlc/vlc/extras/package/apple/build.sh and build.conf
+apply_catalyst_patches() {
+    if [ "$CATALYST" != "yes" ]; then
+        return
+    fi
+
+    local BUILD_SH="${VLCROOT}/extras/package/apple/build.sh"
+
+    # Check if Catalyst support is already present
+    if grep -q "maccatalyst\*)" "$BUILD_SH" 2>/dev/null; then
+        info "Mac Catalyst support already present in VLC build system"
+    else
+        info "WARNING: Mac Catalyst patches not found in VLC build system."
+        info "Please ensure libvlc/vlc/extras/package/apple/build.sh and build.conf have Catalyst support."
+    fi
+}
+
+# Apply Catalyst patches if building for Catalyst
+apply_catalyst_patches
+
 fetch_python3_path() {
     PYTHON3_PATH=$(echo /Library/Frameworks/Python.framework/Versions/3.*/bin | awk '{print $1;}')
     if [ ! -d "${PYTHON3_PATH}" ]; then
@@ -597,6 +649,9 @@ if [ "$WATCHOS" = "yes" ]; then
 fi
 if [ "$MACOS" = "yes" ]; then
     build_device_static_lib "macosx"
+fi
+if [ "$CATALYST" = "yes" ]; then
+    build_device_static_lib "maccatalyst"
 fi
 if [ "$IOS" = "yes" ]; then
     build_simulator_static_lib "iphone"
@@ -749,4 +804,18 @@ if [ "$MACOS" = "yes" ]; then
     spopd # build
 
     info "Build of VLCKit.xcframework for macOS completed"
+fi
+if [ "$CATALYST" = "yes" ]; then
+    CURRENT_DIR=`pwd`
+    info "Building VLCKit.xcframework for Mac Catalyst in ${CURRENT_DIR}"
+
+    buildxcodeproj VLCKit "macosx" "Mac Catalyst"
+
+    spushd build
+    rm -rf Catalyst
+    mkdir Catalyst
+    xcodebuild -create-xcframework -framework VLCKit-macosx.xcarchive/Products/Library/Frameworks/VLCKit.framework -debug-symbols $PROJECT_DIR/build/VLCKit-macosx.xcarchive/dSYMs/VLCKit.framework.dSYM -output Catalyst/VLCKit.xcframework
+    spopd # build
+
+    info "Build of VLCKit.xcframework for Mac Catalyst completed"
 fi
